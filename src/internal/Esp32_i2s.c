@@ -576,6 +576,8 @@ void IRAM_ATTR i2sDmaISR(void* arg)
  //       lldesc_t* item = (lldesc_t*)(i2s->bus->out_eof_des_addr);
         if (i2s->is_sending_data == I2s_Is_Pending)
         {
+            // reset eof on first DMA block
+            i2s->dma_items[0].eof = 0;
             i2s->is_sending_data = I2s_Is_Idle;
         }
         else if (i2s->is_sending_data == I2s_Is_Sending)
@@ -584,6 +586,8 @@ void IRAM_ATTR i2sDmaISR(void* arg)
             lldesc_t* itemSilence = &i2s->dma_items[1];
             itemSilence->qe.stqe_next = &i2s->dma_items[0];
 
+            // if starts looping make sure the interrupt is generated
+            i2s->dma_items[0].eof = 1;
             i2s->is_sending_data = I2s_Is_Pending;
         }
     }
@@ -602,6 +606,9 @@ size_t i2sWrite(uint8_t bus_num, uint8_t* data, size_t len, bool copy, bool free
     lldesc_t* item = &I2S[bus_num].dma_items[0]; 
     size_t dataLeft = len;
     uint8_t* pos = data;
+
+    // reset eof on first DMA block
+    item->eof = 0;
 
     // skip front two silent items
     item += 2;

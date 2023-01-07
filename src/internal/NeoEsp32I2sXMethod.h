@@ -162,12 +162,6 @@ public:
                 dmaBlockCount,
                 0);
 
-            Serial.print("MaxBusDataSize = ");
-            Serial.println(MaxBusDataSize);
-
-            Serial.print("I2sBufferSize = ");
-            Serial.println(I2sBufferSize);
-
             I2sBuffer = static_cast<uint32_t*>(heap_caps_malloc(I2sBufferSize, MALLOC_CAP_DMA));
             // no need to initialize all of it, but since it contains
             // "reset" bits that don't later get overwritten we just clear it all
@@ -217,9 +211,6 @@ public:
     {
         _context.Construct(_i2sBusNumber, i2sSampleRate);
         i2sSetPins(_i2sBusNumber, pin, _muxId, invert);
-
-        Serial.print(" muxid ");
-        Serial.println(_muxId);
     }
 
     void DeregisterMuxBus()
@@ -236,13 +227,12 @@ public:
     {
         if (_context.IsAllMuxBusesUpdated())
         {
-            Serial.println("writing");
             _context.ResetMuxBusesUpdated();
             i2sWrite(_i2sBusNumber, reinterpret_cast<uint8_t*>(_context.I2sBuffer), _context.I2sBufferSize, false, false);
         }
     }
 
-    bool IsWriteDone()
+    bool IsWriteDone() const
     {
         return i2sWriteDone(_i2sBusNumber);
     }
@@ -372,9 +362,6 @@ public:
         _sizeData(pixelCount * elementSize + settingsSize),
         _pin(pin)
     {
-        Serial.print("_sizeData = ");
-        Serial.println(_sizeData);
-        
         _bus.RegisterNewMuxBus(_sizeData + T_SPEED::ResetTimeUs / T_SPEED::ByteSendTimeUs);        
     }
 
