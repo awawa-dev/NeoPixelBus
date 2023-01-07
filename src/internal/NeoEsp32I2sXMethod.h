@@ -242,7 +242,7 @@ public:
         }
     }
 
-    bool IsWriteDone()
+    bool IsWriteDone() const
     {
         return i2sWriteDone(I2sBusNumber);
     }
