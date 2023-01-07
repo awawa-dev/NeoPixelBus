@@ -73,7 +73,8 @@ esp_err_t i2sSetSampleRate(uint8_t bus_num, uint32_t sample_rate, uint8_t bits_p
 // 24 bytes gives us enough time if we use single stage idle
 // with the two stage idle we can use the minimum of 4 bytes
 #define I2S_DMA_SILENCE_SIZE     4*1 
-#define I2S_DMA_SILENCE_BLOCK_COUNT  3 // two front, one back
+#define I2S_DMA_SILENCE_BLOCK_FRONT_COUNT 2 // two front
+#define I2S_DMA_SILENCE_BLOCK_BACK_COUNT 1 // one back
 #define I2S_DMA_QUEUE_COUNT 2
 
 typedef struct 
@@ -148,12 +149,9 @@ bool i2sInitDmaItems(uint8_t bus_num)
 
     int i, i2;
     lldesc_t* item = NULL;
-    lldesc_t* itemPrev = NULL;
 
     for(i=0; i< dmaCount; i++) 
     {
-        itemPrev = item;
-
         i2 = (i+1) % dmaCount;
         item = &I2S[bus_num].dma_items[i];
         item->eof = 0;
@@ -165,8 +163,6 @@ bool i2sInitDmaItems(uint8_t bus_num)
         item->length = I2S[bus_num].silence_len;
         item->qe.stqe_next = &I2S[bus_num].dma_items[i2];   
     }
-    itemPrev->eof = 1;
-    item->eof = 1;
 
     I2S[bus_num].tx_queue = xQueueCreate(I2S_DMA_QUEUE_COUNT, sizeof(lldesc_t*));
     if (I2S[bus_num].tx_queue == NULL) 
@@ -323,18 +319,21 @@ void i2sInit(uint8_t bus_num,
         return;
     }
 
-    size_t extraEndBuffers = 0;
+    assert(I2S_DMA_SILENCE_BLOCK_FRONT_COUNT >= 2);
+
+    // extra silent buffers to avoid doubling problem, 2 + 1 are default
+    size_t extraSilentBuffers = I2S_DMA_SILENCE_BLOCK_FRONT_COUNT + I2S_DMA_SILENCE_BLOCK_BACK_COUNT;
     
     if (bus_num == 1 && bits_per_sample == 8)
     {
-        extraEndBuffers = 2;
+        extraSilentBuffers += 2;
     }
     else if (bits_per_sample == 8 || bits_per_sample == 16)
     {
-        extraEndBuffers = 3;
+        extraSilentBuffers += 3;
     }
 
-    I2S[bus_num].dma_count = dma_count + I2S_DMA_SILENCE_BLOCK_COUNT + extraEndBuffers; // an extra two for looping silence and extra for parallel mode to avoid doubling
+    I2S[bus_num].dma_count = dma_count + extraSilentBuffers; // an extra two for looping silence, one at the end and extra for parallel mode to avoid doubling
     I2S[bus_num].dma_buf_len = dma_len & 0xFFF;
 
     if (!i2sInitDmaItems(bus_num)) 
@@ -342,11 +341,10 @@ void i2sInit(uint8_t bus_num,
         return;
     }
 
-    // eof to extra silence buffers at the end for the parallel mode
-    for(size_t resetIndex = 0; resetIndex < extraEndBuffers; resetIndex++)
-    {
-        I2S[bus_num].dma_items[I2S[bus_num].dma_count - resetIndex - 2].eof = 1;        
-    }
+    // eof to last data item, it will loop the queue to avoid the doubling
+    I2S[bus_num].dma_items[I2S[bus_num].dma_count - (extraSilentBuffers - I2S_DMA_SILENCE_BLOCK_FRONT_COUNT) - 1].eof = 1;
+    // eof to the last of the silent buffers at the end, it will trigger the idle state
+    I2S[bus_num].dma_items[I2S[bus_num].dma_count - 1].eof = 1;
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S3)
 // (I2S_NUM_MAX == 2)
@@ -581,7 +579,7 @@ void IRAM_ATTR i2sDmaISR(void* arg)
         else if (i2s->is_sending_data == I2s_Is_Sending)
         {
             // loop the silent items
-            lldesc_t* itemSilence = &i2s->dma_items[1];
+            lldesc_t* itemSilence = &i2s->dma_items[I2S_DMA_SILENCE_BLOCK_FRONT_COUNT - 1];
             itemSilence->qe.stqe_next = &i2s->dma_items[0];
 
             i2s->is_sending_data = I2s_Is_Pending;
@@ -604,7 +602,7 @@ size_t i2sWrite(uint8_t bus_num, uint8_t* data, size_t len, bool copy, bool free
     uint8_t* pos = data;
 
     // skip front two silent items
-    item += 2;
+    item += I2S_DMA_SILENCE_BLOCK_FRONT_COUNT;
 
     while (dataLeft) 
     {
@@ -627,8 +625,8 @@ size_t i2sWrite(uint8_t bus_num, uint8_t* data, size_t len, bool copy, bool free
 
 
     // reset silence item to not loop
-    item = &I2S[bus_num].dma_items[1];
-    item->qe.stqe_next = &I2S[bus_num].dma_items[2];
+    item = &I2S[bus_num].dma_items[I2S_DMA_SILENCE_BLOCK_FRONT_COUNT-1];
+    item->qe.stqe_next = &I2S[bus_num].dma_items[I2S_DMA_SILENCE_BLOCK_FRONT_COUNT];
     I2S[bus_num].is_sending_data = I2s_Is_Sending;
         
 

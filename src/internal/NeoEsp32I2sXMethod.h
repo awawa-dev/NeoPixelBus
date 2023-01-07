@@ -41,8 +41,8 @@ extern "C"
 
 #pragma once
 
-// ESP32C3 I2S is not supported yet due to significant changes to interface
-#if defined(ARDUINO_ARCH_ESP32) && !defined(CONFIG_IDF_TARGET_ESP32C3)
+// ESP32C3/S3 I2S is not supported yet due to significant changes to interface
+#if defined(ARDUINO_ARCH_ESP32) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S3)
 
 class NeoEspI2sContext
 {
@@ -55,8 +55,8 @@ public:
     uint32_t* I2sBuffer;    // holds the DMA buffer that is referenced by I2sBufDesc
 
     size_t MaxBusDataSize; // max size of stream data from any single mux bus
-    uint8_t UpdateMap;     // bitmap flags of mux buses to track update state
-    uint8_t UpdateMapMask; // mask to used bits in s_UpdateMap
+    uint32_t UpdateMap;     // bitmap flags of mux buses to track update state
+    uint32_t UpdateMapMask; // mask to used bits in s_UpdateMap
     uint8_t BusCount;      // count of mux buses
 
     NeoEspI2sContext(uint8_t _BusMaxCount) :
@@ -76,7 +76,7 @@ public:
         uint8_t muxId = 0;
         while (muxId < BusMaxCount)
         {
-            uint8_t muxIdField = (1 << muxId);
+            uint32_t muxIdField = (1 << muxId);
             if ((UpdateMapMask & muxIdField) == 0)
             {
                 // complete registration
@@ -95,7 +95,7 @@ public:
 
     bool DeregisterMuxBus(uint8_t muxId)
     {
-        uint8_t muxIdField = (1 << muxId);
+        uint32_t muxIdField = (1 << muxId);
         if (UpdateMapMask & muxIdField)
         {
             // complete deregistration
@@ -143,7 +143,7 @@ public:
             size_t dmaBlockCount = (I2sBufferSize + I2S_DMA_MAX_DATA_LEN - 1) / I2S_DMA_MAX_DATA_LEN;
 
             // parallel modes need higher frequency on esp32
-#if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S3)           
+#if !defined(CONFIG_IDF_TARGET_ESP32S2)
             if (BusMaxCount == 8 || BusMaxCount == 16)
             {
                 // 8 bits mode on i2s1 needs two times lower frequency than other parallel modes
@@ -161,12 +161,6 @@ public:
                 I2S_FIFO_32BIT_SINGLE,
                 dmaBlockCount,
                 0);
-
-            Serial.print("MaxBusDataSize = ");
-            Serial.println(MaxBusDataSize);
-
-            Serial.print("I2sBufferSize = ");
-            Serial.println(I2sBufferSize);
 
             I2sBuffer = static_cast<uint32_t*>(heap_caps_malloc(I2sBufferSize, MALLOC_CAP_DMA));
             // no need to initialize all of it, but since it contains
@@ -217,9 +211,6 @@ public:
     {
         _context.Construct(_i2sBusNumber, i2sSampleRate);
         i2sSetPins(_i2sBusNumber, pin, _muxId, invert);
-
-        Serial.print(" muxid ");
-        Serial.println(_muxId);
     }
 
     void DeregisterMuxBus()
@@ -236,13 +227,12 @@ public:
     {
         if (_context.IsAllMuxBusesUpdated())
         {
-            Serial.println("writing");
             _context.ResetMuxBusesUpdated();
             i2sWrite(_i2sBusNumber, reinterpret_cast<uint8_t*>(_context.I2sBuffer), _context.I2sBufferSize, false, false);
         }
     }
 
-    bool IsWriteDone()
+    bool IsWriteDone() const
     {
         return i2sWriteDone(_i2sBusNumber);
     }
@@ -261,7 +251,7 @@ public:
         const uint32_t EncodedOneBit = 0x80800080;
         const uint32_t EncodedBitMask = 0x80808080;
 
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S2)
         const uint64_t EncodedZeroBit64 = 0x0000000000000001;
         const uint64_t EncodedOneBit64 = 0x0000000100010001;
         const uint64_t EncodedBitMask64 = 0x0001000100010001;
@@ -287,7 +277,7 @@ public:
                     uint64_t dma64 = *(pDma64);
                     // clear previous data for mux bus
 
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S2)
                     dma64 &= ~(EncodedBitMask64 << (_muxId));
                     dma64 |= (((value & 0x80) ? EncodedOneBit64 : EncodedZeroBit64) << (_muxId));
 #else
@@ -325,7 +315,7 @@ private:
 };
 
 
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S2)
 
 class NeoEsp32I2s0Mux8Bus : public NeoEsp32I2sMuxBus
 {
@@ -372,9 +362,6 @@ public:
         _sizeData(pixelCount * elementSize + settingsSize),
         _pin(pin)
     {
-        Serial.print("_sizeData = ");
-        Serial.println(_sizeData);
-        
         _bus.RegisterNewMuxBus(_sizeData + T_SPEED::ResetTimeUs / T_SPEED::ByteSendTimeUs);        
     }
 
@@ -443,7 +430,7 @@ private:
 };
 
 // NORMAL
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S2)
     typedef NeoEsp32I2sXMethodBase<NeoEsp32I2sSpeedWs2812x, NeoEsp32I2s0Mux8Bus, NeoEsp32I2sNotInverted> NeoEsp32I2s0X8Ws2812Method;
     typedef NeoEsp32I2sXMethodBase<NeoEsp32I2sSpeedSk6812, NeoEsp32I2s0Mux8Bus, NeoEsp32I2sNotInverted> NeoEsp32I2s0X8Sk6812Method;
 #else
@@ -455,7 +442,7 @@ private:
 
 
 // INVERTED
-#if defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32S2)
     typedef NeoEsp32I2sXMethodBase<NeoEsp32I2sSpeedWs2812x, NeoEsp32I2s0Mux8Bus, NeoEsp32I2sInverted> NeoEsp32I2s0X8Ws2812InvertedMethod;
     typedef NeoEsp32I2sXMethodBase<NeoEsp32I2sSpeedSk6812, NeoEsp32I2s0Mux8Bus, NeoEsp32I2sInverted> NeoEsp32I2s0X8Sk6812InvertedMethod;    
 #else
