@@ -165,7 +165,7 @@ bool i2sInitDmaItems(uint8_t bus_num)
         item->length = I2S[bus_num].silence_len;
         item->qe.stqe_next = &I2S[bus_num].dma_items[i2];   
     }
-    itemPrev->eof = 1;
+    
     item->eof = 1;
 
     I2S[bus_num].tx_queue = xQueueCreate(I2S_DMA_QUEUE_COUNT, sizeof(lldesc_t*));
@@ -343,10 +343,8 @@ void i2sInit(uint8_t bus_num,
     }
 
     // eof to extra silence buffers at the end for the parallel mode
-    for(size_t resetIndex = 0; resetIndex < extraEndBuffers; resetIndex++)
-    {
-        I2S[bus_num].dma_items[I2S[bus_num].dma_count - resetIndex - 2].eof = 1;        
-    }
+    I2S[bus_num].dma_items[I2S[bus_num].dma_count - 1].eof = 0;
+    I2S[bus_num].dma_items[I2S[bus_num].dma_count - extraEndBuffers - 1].eof = 1;
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S3)
 // (I2S_NUM_MAX == 2)
@@ -573,22 +571,13 @@ void IRAM_ATTR i2sDmaISR(void* arg)
 
     if (i2s->bus->int_st.out_eof) 
     {
- //       lldesc_t* item = (lldesc_t*)(i2s->bus->out_eof_des_addr);
-        if (i2s->is_sending_data == I2s_Is_Pending)
-        {
-            // reset eof on first DMA block
-            i2s->dma_items[0].eof = 0;
-            i2s->is_sending_data = I2s_Is_Idle;
-        }
-        else if (i2s->is_sending_data == I2s_Is_Sending)
+        if (i2s->is_sending_data == I2s_Is_Sending)
         {
             // loop the silent items
             lldesc_t* itemSilence = &i2s->dma_items[1];
             itemSilence->qe.stqe_next = &i2s->dma_items[0];
 
-            // if starts looping make sure the interrupt is generated
-            i2s->dma_items[0].eof = 1;
-            i2s->is_sending_data = I2s_Is_Pending;
+            i2s->is_sending_data = I2s_Is_Idle;
         }
     }
 
