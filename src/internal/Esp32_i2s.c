@@ -342,10 +342,6 @@ void i2sInit(uint8_t bus_num,
         return;
     }
 
-    // eof to extra silence buffers at the end for the parallel mode
-    I2S[bus_num].dma_items[I2S[bus_num].dma_count - 1].eof = 0;
-    I2S[bus_num].dma_items[I2S[bus_num].dma_count - extraEndBuffers - 1].eof = 1;
-
 #if !defined(CONFIG_IDF_TARGET_ESP32S2) && !defined(CONFIG_IDF_TARGET_ESP32C3) && !defined(CONFIG_IDF_TARGET_ESP32S3)
 // (I2S_NUM_MAX == 2)
     if (bus_num) 
@@ -595,9 +591,6 @@ size_t i2sWrite(uint8_t bus_num, uint8_t* data, size_t len, bool copy, bool free
     lldesc_t* item = &I2S[bus_num].dma_items[0]; 
     size_t dataLeft = len;
     uint8_t* pos = data;
-
-    // reset eof on first DMA block
-    item->eof = 0;
 
     // skip front two silent items
     item += 2;
