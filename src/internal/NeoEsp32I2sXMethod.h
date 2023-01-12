@@ -140,6 +140,7 @@ public:
         if (UpdateMapMask & muxIdField)
         {
             // complete deregistration
+            pixelMuxDataLen[muxId] = 0;
             BusCount--;
             UpdateMapMask &= ~muxIdField;
             if (UpdateMapMask == 0)
