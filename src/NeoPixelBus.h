@@ -94,6 +94,7 @@ License along with NeoPixel.  If not, see
 #elif defined(ARDUINO_ARCH_ESP32)
 
 #include "internal/NeoEsp32I2sMethod.h"
+#include "internal/NeoEsp32I2sXMethod.h"
 #include "internal/NeoEsp32RmtMethod.h"
 #include "internal/NeoEspBitBangMethod.h"
 #include "internal/DotStarEsp32DmaSpiMethod.h"
