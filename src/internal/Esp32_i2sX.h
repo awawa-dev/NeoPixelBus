@@ -26,6 +26,8 @@ size_t i2sXWrite(uint8_t bus_num, uint8_t* data, size_t len, bool copy, bool fre
 
 bool i2sXWriteDone(uint8_t bus_num);
 
+uint8_t* i2sXGetProcessedDataPtr(uint8_t bus_num);
+
 #ifdef __cplusplus
 }
 #endif

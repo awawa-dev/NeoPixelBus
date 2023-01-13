@@ -19,6 +19,7 @@
     High optimizated for speed using two parallel channels:
       - FillBuffer: one time pass for better performance
       - LUT tables support
+      - the i2s buffer prefill  
       - other optimization for i2s handling   
     by @awawa-dev (https://github.com/awawa-dev)
 
@@ -103,6 +104,8 @@ typedef struct
     uint32_t dma_buf_len :12;
     uint32_t unused      :20;
     volatile uint32_t is_sending_data;
+    uint8_t* data_ptr;
+    volatile uint8_t* last_data_ptr;
 } i2s_bus_t;
 
 // is_sending_data values
@@ -116,13 +119,13 @@ static uint8_t i2s_silence_buf[I2S_DMA_SILENCE_SIZE] = { 0 };
 // (I2S_NUM_MAX == 2)
 static i2s_bus_t I2SX[I2S_NUM_MAX] = 
 {
-    {&I2S0, -1, -1, -1, -1, 0, NULL, i2s_silence_buf, I2S_DMA_SILENCE_SIZE, NULL, I2S_DMA_BLOCK_COUNT_DEFAULT, 0, 0, I2s_Is_Idle},
-    {&I2S1, -1, -1, -1, -1, 0, NULL, i2s_silence_buf, I2S_DMA_SILENCE_SIZE, NULL, I2S_DMA_BLOCK_COUNT_DEFAULT, 0, 0, I2s_Is_Idle}
+    {&I2S0, -1, -1, -1, -1, 0, NULL, i2s_silence_buf, I2S_DMA_SILENCE_SIZE, NULL, I2S_DMA_BLOCK_COUNT_DEFAULT, 0, 0, I2s_Is_Idle, NULL, NULL},
+    {&I2S1, -1, -1, -1, -1, 0, NULL, i2s_silence_buf, I2S_DMA_SILENCE_SIZE, NULL, I2S_DMA_BLOCK_COUNT_DEFAULT, 0, 0, I2s_Is_Idle, NULL, NULL}
 };
 #else
 static i2s_bus_t I2SX[I2S_NUM_MAX] = 
 {
-    {&I2S0, -1, -1, -1, -1, 0, NULL, i2s_silence_buf, I2S_DMA_SILENCE_SIZE, NULL, I2S_DMA_BLOCK_COUNT_DEFAULT, 0, 0, I2s_Is_Idle}
+    {&I2S0, -1, -1, -1, -1, 0, NULL, i2s_silence_buf, I2S_DMA_SILENCE_SIZE, NULL, I2S_DMA_BLOCK_COUNT_DEFAULT, 0, 0, I2s_Is_Idle, NULL, NULL}
 };
 #endif
 
@@ -279,7 +282,7 @@ void i2sXSetPins(uint8_t bus_num, int8_t out, int8_t parallel, bool invert)
             }
             else
             {
-                i2sSignal = I2S0O_DATA_OUT16_IDX + parallel;                
+                i2sSignal = I2S0O_DATA_OUT16_IDX + parallel;
             }
         }
 
@@ -289,12 +292,24 @@ void i2sXSetPins(uint8_t bus_num, int8_t out, int8_t parallel, bool invert)
 
 bool i2sXWriteDone(uint8_t bus_num) 
 {
-    if (bus_num >= I2S_NUM_MAX) 
+    if (bus_num >= I2S_NUM_MAX)
     {
         return false;
     }
 
     return (I2SX[bus_num].is_sending_data == I2s_Is_Idle);
+}
+
+uint8_t* i2sXGetProcessedDataPtr(uint8_t bus_num)
+{
+    if (bus_num >= I2S_NUM_MAX) 
+    {
+        return false;
+    }
+
+    uint8_t* retVal = (uint8_t*)I2SX[bus_num].last_data_ptr;
+    
+    return retVal;
 }
 
 void i2sXResetFifoDMA(i2s_dev_t* i2s)
@@ -329,13 +344,18 @@ void i2sXInit(uint8_t bus_num,
         return;
     }
 
-    // eof to last data item, it will loop the queue to avoid the doubling    
-    for(int i = 0; i < I2S_DMA_SILENCE_BLOCK_BACK_COUNT + 1; i++)
-    {
-        I2SX[bus_num].dma_items[I2SX[bus_num].dma_count - i - 1].eof = 1;        
-    }
-    // eof to loop first two segments
-    I2SX[bus_num].dma_items[I2S_DMA_SILENCE_BLOCK_FRONT_COUNT].eof = 1;
+    #if !defined(CONFIG_IDF_TARGET_ESP32S2)
+        for(int i = I2S_DMA_SILENCE_BLOCK_FRONT_COUNT; i < I2SX[bus_num].dma_count; i++)
+        {
+            I2SX[bus_num].dma_items[i].eof = 1;       
+        }
+    #else
+        for(int i = 0; i < I2S_DMA_SILENCE_BLOCK_BACK_COUNT + 1; i++)
+        {
+            I2SX[bus_num].dma_items[I2SX[bus_num].dma_count - i - 1].eof = 1;
+        }
+        I2SX[bus_num].dma_items[I2S_DMA_SILENCE_BLOCK_FRONT_COUNT].eof = 1;
+    #endif
 
     #if !defined(CONFIG_IDF_TARGET_ESP32S2)
     if (bus_num) 
@@ -454,21 +474,58 @@ void IRAM_ATTR i2sXDmaISR(void* arg)
 {
     i2s_bus_t* i2s = (i2s_bus_t*)(arg);
 
-    if (i2s->bus->int_st.out_eof) 
-    {
-        if (i2s->is_sending_data == I2s_Is_Pending)
+    #if defined(CONFIG_IDF_TARGET_ESP32S2)
+        if (i2s->bus->int_st.out_eof) 
         {
-            i2s->is_sending_data = I2s_Is_Idle;
+            if (i2s->is_sending_data == I2s_Is_Pending)
+            {
+                i2s->is_sending_data = I2s_Is_Idle;
+            }
+            else if (i2s->is_sending_data == I2s_Is_Sending)
+            {
+                // loop the silent items
+                lldesc_t* itemSilence = &i2s->dma_items[I2S_DMA_SILENCE_BLOCK_FRONT_COUNT - 1];
+                itemSilence->qe.stqe_next = &i2s->dma_items[0];
+                i2s->is_sending_data = I2s_Is_Pending;
+            }
         }
-        else if (i2s->is_sending_data == I2s_Is_Sending)
+    #else
+        if (i2s->bus->int_st.out_eof) 
         {
-            // loop the silent items
-            lldesc_t* itemSilence = &i2s->dma_items[I2S_DMA_SILENCE_BLOCK_FRONT_COUNT - 1];
-            itemSilence->qe.stqe_next = &i2s->dma_items[0];
+            lldesc_t* item = (lldesc_t*)(i2s->bus->out_eof_des_addr);
+            int found = -1;
 
-            i2s->is_sending_data = I2s_Is_Pending;
+            for(int i = I2S_DMA_SILENCE_BLOCK_FRONT_COUNT; i < i2s->dma_count && found < 0; i++)            
+                if (item == &(i2s->dma_items[i]))
+                {
+                    found = i;
+                }
+            
+            if (found >= 0)
+            {
+                if (found >= i2s->dma_count - I2S_DMA_SILENCE_BLOCK_BACK_COUNT)
+                {
+                    if (i2s->is_sending_data == I2s_Is_Pending)
+                    {
+                        i2s->is_sending_data = I2s_Is_Idle;
+                    }
+                }
+                else 
+                {
+                    if (i2s->is_sending_data == I2s_Is_Sending)
+                    {
+                        lldesc_t* itemSilence = &i2s->dma_items[I2S_DMA_SILENCE_BLOCK_FRONT_COUNT - 1];
+                        itemSilence->qe.stqe_next = &i2s->dma_items[0];
+                        i2s->is_sending_data = I2s_Is_Pending;
+                    }
+
+                    found -= I2S_DMA_SILENCE_BLOCK_FRONT_COUNT + 1;
+                    if (found > 0)
+                        i2s->last_data_ptr = i2s->data_ptr + found * I2S_DMA_MAX_DATA_LEN;            
+                }
+            }        
         }
-    }
+    #endif
 
     i2s->bus->int_clr.val = i2s->bus->int_st.val;
 }
@@ -507,6 +564,8 @@ size_t i2sXWrite(uint8_t bus_num, uint8_t* data, size_t len, bool copy, bool fre
         pos += blockSize;
     }
 
+    I2SX[bus_num].data_ptr = data;
+    I2SX[bus_num].last_data_ptr = NULL;
     I2SX[bus_num].is_sending_data = I2s_Is_Sending;    
     I2SX[bus_num].dma_items[I2S_DMA_SILENCE_BLOCK_FRONT_COUNT-1].qe.stqe_next = &I2SX[bus_num].dma_items[I2S_DMA_SILENCE_BLOCK_FRONT_COUNT];    
     

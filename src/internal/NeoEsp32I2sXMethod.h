@@ -31,6 +31,7 @@ License along with NeoPixel.  If not, see
     High optimizated for speed using two parallel channels:
       - FillBuffer: one time pass for better performance
       - LUT tables support
+      - the i2s buffer prefill 
       - other optimization for i2s handling   
     by @awawa-dev (https://github.com/awawa-dev)
 
@@ -140,6 +141,7 @@ public:
         if (UpdateMapMask & muxIdField)
         {
             // complete deregistration
+            pixelMuxData[muxId] = nullptr;
             pixelMuxDataLen[muxId] = 0;
             BusCount--;
             UpdateMapMask &= ~muxIdField;
@@ -229,11 +231,22 @@ public:
         const uint8_t* end1 = data1 + pixelMuxDataLen[0];
         const uint8_t* data2 = pixelMuxData[1];
         const uint8_t* end2 = data2 + pixelMuxDataLen[1];
+        uint8_t* lastDataPtr = NULL;
+        bool isFinished = i2sXWriteDone(i2sBus);       
 
-        for(; data1 < end1 || data2 < end2 ; data1++, data2++)
+        while (data1 < end1 || data2 < end2)
         {
-            uint8_t value1 = (data1 < end1) ? *data1 : 0;
-            uint8_t value2 = (data2 < end2) ? *data2 : 0;
+            uint8_t value1 = (data1 < end1) ? *(data1++) : 0;
+            uint8_t value2 = (data2 < end2) ? *(data2++) : 0;
+
+            while (!isFinished && pDma64 >= reinterpret_cast<uint64_t*>(lastDataPtr))
+            {
+                isFinished = i2sXWriteDone(i2sBus);
+                lastDataPtr = i2sXGetProcessedDataPtr(i2sBus);
+                if (lastDataPtr != NULL) 
+                    lastDataPtr -= 8 * 8;           
+                yield();                
+            }
 
             for (uint8_t bit = 0; bit < 8; bit++)
             {
@@ -252,6 +265,11 @@ public:
                 }
             }
         }
+
+        while(!i2sXWriteDone(i2sBus))
+        {
+            yield();
+        }       
     }
 };
 
@@ -298,7 +316,12 @@ public:
 
     bool IsWriteDone() const
     {
-        return i2sXWriteDone(_i2sBusNumber);
+        #if !defined(CONFIG_IDF_TARGET_ESP32S2)
+            // always ready to pre-fill
+            return true;
+        #else
+            return i2sXWriteDone(_i2sBusNumber);
+        #endif
     }
 
     void MarkUpdated()
