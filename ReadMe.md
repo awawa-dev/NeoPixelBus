@@ -1,36 +1,24 @@
-# NeoPixelBus
+# About
 
-[![Donate](https://img.shields.io/badge/paypal-donate-yellow.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=6AA97KE54UJR4)
+I created this fork of Neopixelbus to improve LED sequence rendering for ESP32/ESP32-S2 devices using I2S interface.
+It implements a double buffering technique using DMA buffer filling on demand, which means low memory consumption even when using a large number of RGB LEDs and low sequence rendering performance. It is used for single LED strip and multi-segment parallel output modes (up to 2 segments), which especially requires much more resources like memory and CPU, to prepare the DMA buffer. Without pre-filling on demand, you can experience a very long delay between frames or out of memory problem.
 
-Arduino NeoPixel library
+It is used in my HyperSerialESP32 and HyperSPI projects. Both ESP32 and ESP32-S2 (tested on Lolin mini) are supported.
 
-A library to control one wire protocol RGB and RGBW leds like APA106, SK6812, WS2811, WS2812 and WS2813 that are commonly refered to as NeoPixels and two wire protocol RGB like Lpd8806, APA102 and SK9822 commonly refered to as DotStars.
-Supports most Arduino platforms.  
+# Usage
 
-Please read this best practices link before connecting your NeoPixels, it will save you a lot of time and effort.  
-[Adafruit NeoPixel Best Practices](https://learn.adafruit.com/adafruit-neopixel-uberguide/best-practices)
+It's easy to use, because it still uses Neopixelbus API. Examples are available here: [link](https://github.com/awawa-dev/NeoPixelBus/tree/HyperSerialESP32/examples/ESP32)
 
-For quick questions and support:  
-* [Try the new Github Discussions](https://github.com/Makuna/NeoPixelBus/discussions)  
-* [Discord NeoPixelBus Invitation](https://discord.gg/c6FrysvZyV) or if you are already a member of [Discord Server NeoPixelBus](https://discord.com/channels/789177382221119519/789177382221119521)  
-* Or jump on Gitter   
-[![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/Makuna/NeoPixelBus?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)  
+# How on-demand prefill works?
 
-For bugs, make sure there isn't an active issue and then create one.
+On the following screenshot HyperHDR and ESP32 & ESP32-S2 with HyperSerialESP32 are handling 1800 RGBW LEDs at the same time (two 900LEDs segments). First two lines are for ESP32-S2 sending output to the two LEDs segments, the third line is rendering new frame busy status (or sleeping and waiting for DMA buffer to be freed), the fourth line is is awaken and filling part of DMA buffer that was already sent. Next four lines are for the second device: ESP32 and its two 450 RGBW LEDs segments. RGBW LEDs (sk6812) requires much more data to be stored in memory, prepared and sent than RGB like ws2812b.
 
-## Why this library and not FastLED or some other library?
-See [Why this Library in the Wiki](https://github.com/Makuna/NeoPixelBus/wiki/Library-Comparisons). 
+![obraz](https://user-images.githubusercontent.com/69086569/215071097-97797592-4461-4c65-8c41-a6a24f0b30d5.png)
 
-## Documentation
-[See Wiki](https://github.com/Makuna/NeoPixelBus/wiki)
+To enable such debugging define: `DebugBusyPin`, `DebugWorkingPin` before including this library and enable these pins for `OUTPUT` with `pinMode` afterwards.
 
-## Installing This Library (preferred, you just want to use it)
-Open the Library Manager and search for "NeoPixelBus by Makuna" and install
 
-## Installing This Library From GitHub (advanced, you want to contribute)
-Create a directory in your Arduino\Library folder named "NeoPixelBus"
-Clone (Git) this project into that folder.  
-It should now show up in the import list when you restart Arduino IDE.
+
 
 
 
